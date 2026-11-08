@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct Participant {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub town_name: Option<String>,
     pub coordinates: [f64; 2], // [lng, lat]
     pub color: String,
 }
@@ -48,6 +50,8 @@ pub struct CalculationRequest {
     pub action: String,
     pub participants: Vec<Participant>,
     pub weights: Option<CalculationWeights>,
+    #[serde(default)]
+    pub selected_categories: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,14 +94,17 @@ pub struct RoadCandidateVerdict {
     pub status: String, // "WINNER", "CONTENDER", "REJECTED"
     pub reason: String,
     pub rank: usize,
+    #[serde(default)]
+    pub area_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoiItem {
     pub id: String,
     pub name: String,
-    pub category: String, // "cafe", "park", "mall"
-    pub coordinates: [f64; 2],
+    pub category: String, // "cafe", "park", "mall", "restaurant"
+    pub coordinates: [f64; 2], // [lng, lat]
+    pub distance_meters: f64,
     pub walking_minutes: u32,
     pub address: Option<String>,
     pub highlight: Option<String>,
@@ -106,8 +113,9 @@ pub struct PoiItem {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CategorizedPois {
     pub cafes: Vec<PoiItem>,
-    pub parks: Vec<PoiItem>,
     pub malls: Vec<PoiItem>,
+    pub parks: Vec<PoiItem>,
+    pub restaurants: Vec<PoiItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

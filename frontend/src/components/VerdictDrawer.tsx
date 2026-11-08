@@ -11,19 +11,23 @@ import {
   Compass,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { FinalRoadVerdictPayload, PoiItem } from '../types';
+import { CategoryFilter, FinalRoadVerdictPayload, PoiItem } from '../types';
 import { VenueExplorer } from './VenueExplorer';
 
 interface VerdictDrawerProps {
   verdict: FinalRoadVerdictPayload | null;
   onSelectPoi?: (poi: PoiItem) => void;
   selectedPoiId?: string | null;
+  categoryFilter?: CategoryFilter;
+  onCategoryFilterChange?: (filter: CategoryFilter) => void;
 }
 
 export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
   verdict,
   onSelectPoi,
   selectedPoiId,
+  categoryFilter = 'all',
+  onCategoryFilterChange,
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [selectedHubIndex, setSelectedHubIndex] = useState<number>(0);
@@ -39,7 +43,7 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
           colors: ['#ccff00', '#38bdf8', '#f43f5e', '#ffffff'],
         });
       } catch {
-        // Safe fallback if canvas is unavailable
+        // Safe fallback
       }
     }
   }, [verdict]);
@@ -56,8 +60,14 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
     1
   );
 
+  const totalSpotCount =
+    (verdict.pois.cafes?.length || 0) +
+    (verdict.pois.malls?.length || 0) +
+    (verdict.pois.parks?.length || 0) +
+    (verdict.pois.restaurants?.length || 0);
+
   const handleShare = () => {
-    const text = `Gitna Road Midpoint: ${verdict.winner.hub_name} (Fairness: ${verdict.winner.fairness_score}%, Travel Disparity: ${verdict.winner.delta_road_mins} min). Calculated using real road network.`;
+    const text = `Gitna Road Midpoint: ${verdict.winner.hub_name} (Fairness: ${verdict.winner.fairness_score}%, Travel Disparity: ${verdict.winner.delta_road_mins} min, ${totalSpotCount} spots within 1.5 km). Calculated using real Luzon road network.`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopied(true);
@@ -89,7 +99,11 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
                   </span>
                 </h3>
                 <p className="text-xs text-zinc-400 truncate">
-                  {selectedHubIndex === 0 ? 'Optimal road midpoint convergence' : 'Alternative meetup option'}
+                  {currentHubVerdict.area_name
+                    ? currentHubVerdict.area_name
+                    : selectedHubIndex === 0
+                    ? `Optimal road midpoint • ${totalSpotCount} spots within 1.5 km`
+                    : 'Alternative meetup option'}
                 </p>
               </div>
             </div>
@@ -219,16 +233,23 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
                 </p>
               </div>
 
-              {/* Meetup Venues near winning road coordinate */}
+              {/* Meetup Venues physically surrounding winning road coordinate */}
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
-                  <MapPin size={16} strokeWidth={1.75} className="text-zinc-400" />
-                  <span>Nearby meetup venues (within 800m)</span>
+                <div className="flex items-center justify-between text-xs font-medium text-zinc-300">
+                  <span className="flex items-center gap-1.5">
+                    <MapPin size={16} strokeWidth={1.75} className="text-zinc-400" />
+                    <span>Nearby meetup spots (within 1.5 km)</span>
+                  </span>
+                  <span className="text-zinc-500 text-[11px] tabular-nums font-mono">
+                    {totalSpotCount} spots found
+                  </span>
                 </div>
                 <VenueExplorer
                   pois={verdict.pois}
                   onSelectPoi={onSelectPoi}
                   selectedPoiId={selectedPoiId}
+                  activeFilter={categoryFilter}
+                  onFilterChange={onCategoryFilterChange}
                 />
               </div>
             </div>

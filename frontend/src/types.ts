@@ -1,6 +1,7 @@
 export interface Participant {
   id: string;
   name: string;
+  town_name?: string;
   coordinates: [number, number]; // [lng, lat]
   color: string;
 }
@@ -55,13 +56,17 @@ export interface RoadCandidateVerdict {
   status: string;
   reason: string;
   rank: number;
+  area_name?: string;
 }
+
+export type SpotCategory = 'cafe' | 'mall' | 'park' | 'restaurant';
 
 export interface PoiItem {
   id: string;
   name: string;
-  category: 'cafe' | 'park' | 'mall';
+  category: SpotCategory;
   coordinates: [number, number];
+  distance_meters: number;
   walking_minutes: number;
   address?: string;
   highlight?: string;
@@ -69,8 +74,9 @@ export interface PoiItem {
 
 export interface CategorizedPois {
   cafes: PoiItem[];
-  parks: PoiItem[];
   malls: PoiItem[];
+  parks: PoiItem[];
+  restaurants: PoiItem[];
 }
 
 export interface TestedCandidateFrame {
@@ -103,3 +109,5 @@ export type StreamEvent =
   | { type: 'ERROR'; message: string };
 
 export type EnginePhase = 'IDLE' | 'HIGHWAY_CRAWL' | 'CANDIDATE_ROAD_TEST' | 'VERDICT' | 'ERROR';
+
+export type CategoryFilter = 'all' | 'cafe' | 'mall' | 'park' | 'restaurant';

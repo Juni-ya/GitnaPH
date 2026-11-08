@@ -2,10 +2,11 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { DeckGL } from '@deck.gl/react';
 import { Map } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
-import { ScatterplotLayer, PathLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PathLayer, PolygonLayer } from '@deck.gl/layers';
 
 import {
   CandidateHub,
+  CategoryFilter,
   EnginePhase,
   PartialPolyline,
   Participant,
@@ -26,17 +27,48 @@ interface MapCanvasProps {
   pois: PoiItem[];
   selectedPoi: PoiItem | null;
   onSelectPoi?: (poi: PoiItem) => void;
+  categoryFilter?: CategoryFilter;
 }
 
+// Luzon Philippines Bounding Envelope: [[119.40, 12.40], [124.60, 18.75]]
+const LUZON_BOUNDS: [[number, number], [number, number]] = [
+  [119.40, 12.40],
+  [124.60, 18.75],
+];
+
 const INITIAL_VIEW_STATE = {
-  longitude: 120.985,
-  latitude: 14.58,
-  zoom: 10.4,
-  pitch: 36,
-  bearing: -6,
+  longitude: 121.00,
+  latitude: 14.65,
+  zoom: 8.8,
+  pitch: 35,
+  bearing: -4,
   maxZoom: 18,
-  minZoom: 8,
+  minZoom: 6.8,
 };
+
+// Inverted mask polygon: dark fill covering area outside Luzon
+const LUZON_INVERSE_MASK = [
+  {
+    polygon: [
+      // Outer ring (world extent)
+      [
+        [-180, -90],
+        [180, -90],
+        [180, 90],
+        [-180, 90],
+        [-180, -90],
+      ],
+      // Inner ring (Luzon viewport window)
+      [
+        [119.40, 12.40],
+        [124.60, 12.40],
+        [124.60, 18.75],
+        [119.40, 18.75],
+        [119.40, 12.40],
+      ],
+    ],
+  },
+];
 
 function hexToRgba(hex: string, alpha: number = 255): [number, number, number, number] {
   const cleanHex = hex.replace('#', '');
@@ -50,13 +82,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   phase,
   participants,
   hubs,
-  directMidpoint,
+  directMidpoint: _directMidpoint,
   crawlingPolylines,
   currentCandidate,
   winnerVerdict,
   pois,
   selectedPoi,
   onSelectPoi,
+  categoryFilter = 'all',
 }) => {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [pulseTime, setPulseTime] = useState(0);
@@ -73,23 +106,43 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, []);
 
-  // Smooth camera flyTo when winner is determined
+  // Smooth camera flyTo to zoom 14.5 when winner midpoint is determined
   useEffect(() => {
     if (winnerVerdict) {
       setViewState((prev) => ({
         ...prev,
         longitude: winnerVerdict.hub_coords[0],
         latitude: winnerVerdict.hub_coords[1],
-        zoom: 12.2,
-        pitch: 42,
-        transitionDuration: 1800,
+        zoom: 14.5,
+        pitch: 45,
+        transitionDuration: 2000,
       }));
     }
   }, [winnerVerdict]);
 
-  // Deck.gl Layers (STRICTLY REAL ROAD PATHS - ZERO STRAIGHT LINES)
+  // Filter POIs by active category filter without re-running calculation
+  const filteredPois = useMemo(() => {
+    if (categoryFilter === 'all') return pois;
+    return pois.filter((p) => p.category === categoryFilter);
+  }, [pois, categoryFilter]);
+
+  // Deck.gl Layers (100% Real Road Network Polylines - Zero Straight Lines)
   const layers = useMemo(() => {
     const list: any[] = [];
+
+    // 0. Luzon Dark Inverse Mask Polygon (Rule 2)
+    list.push(
+      new PolygonLayer({
+        id: 'luzon-inverse-mask',
+        data: LUZON_INVERSE_MASK,
+        getPolygon: (d: any) => d.polygon,
+        getFillColor: [9, 9, 11, 242], // 95% opacity dark zinc #09090b
+        stroked: true,
+        getLineColor: [39, 39, 42, 220],
+        lineWidthMinPixels: 1,
+        pickable: false,
+      })
+    );
 
     // 1. Stage 1: Highway Crawl Sliced Polylines (Real OSRM LineStrings)
     if (crawlingPolylines.length > 0 && phase === 'HIGHWAY_CRAWL') {
@@ -99,9 +152,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           data: crawlingPolylines,
           getPath: (d: PartialPolyline) => d.coordinates,
           getColor: (d: PartialPolyline) => hexToRgba(d.color, 70),
-          getWidth: 60,
-          widthMinPixels: 5,
-          widthMaxPixels: 12,
+          getWidth: 55,
+          widthMinPixels: 4,
+          widthMaxPixels: 11,
           pickable: false,
         }),
         new PathLayer({
@@ -109,7 +162,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           data: crawlingPolylines,
           getPath: (d: PartialPolyline) => d.coordinates,
           getColor: (d: PartialPolyline) => hexToRgba(d.color, 255),
-          getWidth: 24,
+          getWidth: 22,
           widthMinPixels: 2.5,
           widthMaxPixels: 5,
           pickable: false,
@@ -124,10 +177,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           id: 'candidate-tested-roads-glow',
           data: currentCandidate.user_road_routes,
           getPath: (d: UserRoadRoute) => d.coordinates,
-          getColor: (d: UserRoadRoute) => hexToRgba(d.color, 80),
-          getWidth: 55,
+          getColor: (d: UserRoadRoute) => hexToRgba(d.color, 75),
+          getWidth: 50,
           widthMinPixels: 4,
-          widthMaxPixels: 10,
+          widthMaxPixels: 9,
           pickable: false,
         }),
         new PathLayer({
@@ -135,32 +188,32 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           data: currentCandidate.user_road_routes,
           getPath: (d: UserRoadRoute) => d.coordinates,
           getColor: (d: UserRoadRoute) => hexToRgba(d.color, 240),
-          getWidth: 22,
+          getWidth: 20,
           widthMinPixels: 2,
-          widthMaxPixels: 4.5,
+          widthMaxPixels: 4,
           pickable: false,
         })
       );
 
-      // Dynamic pin on candidate currently being tested
+      // Testing pin pulse
       list.push(
         new ScatterplotLayer({
           id: 'tested-hub-pin-pulse',
           data: [currentCandidate],
           getPosition: (d: TestedCandidateFrame) => d.hub_coords,
-          getRadius: 600 + Math.sin(pulseTime * 2.5) * 150,
+          getRadius: 550 + Math.sin(pulseTime * 2.5) * 140,
           radiusMinPixels: 12,
           radiusMaxPixels: 24,
-          getFillColor: [251, 191, 36, 50],
+          getFillColor: [251, 191, 36, 45],
           stroked: true,
-          getLineColor: [251, 191, 36, 230],
-          lineWidthMinPixels: 2.5,
+          getLineColor: [251, 191, 36, 220],
+          lineWidthMinPixels: 2,
         }),
         new ScatterplotLayer({
           id: 'tested-hub-pin-core',
           data: [currentCandidate],
           getPosition: (d: TestedCandidateFrame) => d.hub_coords,
-          getRadius: 180,
+          getRadius: 160,
           radiusMinPixels: 5,
           radiusMaxPixels: 9,
           getFillColor: [255, 255, 255, 255],
@@ -175,10 +228,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           id: 'winner-road-routes-glow',
           data: winnerVerdict.user_road_routes,
           getPath: (d: UserRoadRoute) => d.coordinates,
-          getColor: (d: UserRoadRoute) => hexToRgba(d.color, 90),
-          getWidth: 70,
+          getColor: (d: UserRoadRoute) => hexToRgba(d.color, 85),
+          getWidth: 65,
           widthMinPixels: 5,
-          widthMaxPixels: 14,
+          widthMaxPixels: 13,
           pickable: true,
         }),
         new PathLayer({
@@ -186,15 +239,15 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           data: winnerVerdict.user_road_routes,
           getPath: (d: UserRoadRoute) => d.coordinates,
           getColor: (d: UserRoadRoute) => hexToRgba(d.color, 255),
-          getWidth: 28,
+          getWidth: 26,
           widthMinPixels: 2.5,
-          widthMaxPixels: 6,
+          widthMaxPixels: 5.5,
           pickable: true,
         })
       );
 
-      // Winner Beacon with Electric Lime Accent [204, 255, 0] (#CCFF00)
-      const haloRadius = 750 + Math.sin(pulseTime * 3) * 200;
+      // Winning Midpoint Beacon with Electric Lime Accent [204, 255, 0] (#CCFF00)
+      const haloRadius = 700 + Math.sin(pulseTime * 3) * 180;
       list.push(
         new ScatterplotLayer({
           id: 'winner-halo-layer',
@@ -212,7 +265,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           id: 'winner-core-layer',
           data: [winnerVerdict],
           getPosition: (d: RoadCandidateVerdict) => d.hub_coords,
-          getRadius: 240,
+          getRadius: 220,
           radiusMinPixels: 7,
           radiusMaxPixels: 12,
           getFillColor: [255, 255, 255, 255],
@@ -220,48 +273,49 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 4. Candidate Hubs Markers (including Direct Highway Midpoint Pin)
+    // 4. Candidate Hubs Markers
     if (hubs.length > 0) {
       list.push(
         new ScatterplotLayer({
           id: 'candidate-hubs-layer',
           data: hubs,
           getPosition: (d: CandidateHub) => d.coordinates,
-          getRadius: 240,
+          getRadius: 220,
           radiusMinPixels: 5,
           radiusMaxPixels: 8,
           getFillColor: (d: CandidateHub) => {
             if (winnerVerdict && d.id === winnerVerdict.hub_id) return [204, 255, 0, 255];
             if (currentCandidate && d.id === currentCandidate.hub_id) return [251, 191, 36, 255];
             if (d.id === 'direct_road_midpoint') return [244, 63, 94, 240];
-            return [113, 113, 122, 200];
+            return [113, 113, 122, 190];
           },
           stroked: true,
           getLineColor: [24, 24, 27, 255],
-          lineWidthMinPixels: 2,
+          lineWidthMinPixels: 1.5,
           pickable: true,
         })
       );
     }
 
-    // 5. POIs Pins (Cafes, Parks, Malls) near winning road coordinate
-    if (pois.length > 0) {
+    // 5. POIs Pins Physically Surrounding Midpoint (Cafes, Malls, Parks, Restaurants)
+    if (filteredPois.length > 0) {
       list.push(
         new ScatterplotLayer({
           id: 'pois-layer',
-          data: pois,
+          data: filteredPois,
           getPosition: (d: PoiItem) => d.coordinates,
-          getRadius: 130,
-          radiusMinPixels: 4,
-          radiusMaxPixels: 8,
+          getRadius: 110,
+          radiusMinPixels: 5,
+          radiusMaxPixels: 10,
           getFillColor: (d: PoiItem) => {
             if (selectedPoi && d.id === selectedPoi.id) return [204, 255, 0, 255];
-            if (d.category === 'cafe') return [245, 158, 11, 220];
-            if (d.category === 'park') return [16, 185, 129, 220];
-            return [56, 189, 248, 220];
+            if (d.category === 'cafe') return [245, 158, 11, 230];
+            if (d.category === 'mall') return [56, 189, 248, 230];
+            if (d.category === 'park') return [16, 185, 129, 230];
+            return [244, 63, 94, 230]; // restaurant
           },
           stroked: true,
-          getLineColor: [255, 255, 255, 200],
+          getLineColor: [255, 255, 255, 220],
           lineWidthMinPixels: 1.5,
           pickable: true,
           onClick: (info: any) => {
@@ -273,17 +327,17 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 6. Participant Origin Beacons
+    // 6. Participant Origin Pins
     if (participants.length > 0) {
       list.push(
         new ScatterplotLayer({
           id: 'participants-beacon-layer',
           data: participants,
           getPosition: (d: Participant) => d.coordinates,
-          getRadius: 550 + Math.sin(pulseTime * 2.5) * 120,
+          getRadius: 500 + Math.sin(pulseTime * 2.5) * 100,
           radiusMinPixels: 10,
           radiusMaxPixels: 20,
-          getFillColor: (d: Participant) => hexToRgba(d.color, 50),
+          getFillColor: (d: Participant) => hexToRgba(d.color, 45),
           stroked: true,
           getLineColor: (d: Participant) => hexToRgba(d.color, 230),
           lineWidthMinPixels: 2,
@@ -293,9 +347,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           id: 'participants-core-layer',
           data: participants,
           getPosition: (d: Participant) => d.coordinates,
-          getRadius: 200,
+          getRadius: 180,
           radiusMinPixels: 5,
-          radiusMaxPixels: 9,
+          radiusMaxPixels: 8,
           getFillColor: (d: Participant) => hexToRgba(d.color, 255),
         })
       );
@@ -308,7 +362,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     currentCandidate,
     winnerVerdict,
     hubs,
-    pois,
+    filteredPois,
     selectedPoi,
     onSelectPoi,
     participants,
@@ -323,17 +377,17 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       'padding: 8px 12px; background: rgba(24, 24, 27, 0.96); border: 1px solid #3f3f46; border-radius: 8px; font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: #f4f4f5; box-shadow: 0 4px 16px rgba(0,0,0,0.4); line-height: 1.4;';
 
     // Participant tooltip
-    if (obj.name && !obj.category) {
+    if (obj.name && !obj.category && obj.color) {
       return {
         html: `<div style="${baseStyle}">
           <div style="font-weight: 600; color: ${obj.color};">${obj.name}</div>
-          <div style="font-size: 11px; color: #a1a1aa;">Origin point</div>
+          <div style="font-size: 11px; color: #a1a1aa;">Town Center Origin</div>
         </div>`,
       };
     }
 
     // Candidate Hub tooltip
-    if (obj.name && obj.category) {
+    if (obj.name && obj.category && !obj.walking_minutes) {
       return {
         html: `<div style="${baseStyle}">
           <div style="font-weight: 600; color: #f4f4f5;">${obj.name}</div>
@@ -356,13 +410,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       };
     }
 
-    // POI tooltip
+    // POI Tooltip
     if (obj.category && obj.walking_minutes !== undefined) {
+      const catLabel = obj.category.charAt(0).toUpperCase() + obj.category.slice(1);
       return {
         html: `<div style="${baseStyle}">
           <div style="font-weight: 600; color: #f4f4f5;">${obj.name}</div>
           <div style="font-size: 11px; color: #a1a1aa;">
-            ${obj.category} • <span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.walking_minutes}</span> min walk
+            ${catLabel} • <span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.distance_meters || 300}m</span> (<span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.walking_minutes}</span> min walk)
           </div>
           ${obj.highlight ? `<div style="font-size: 11px; color: #71717a; margin-top: 2px;">${obj.highlight}</div>` : ''}
         </div>`,
@@ -384,6 +439,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         <Map
           mapLib={maplibregl}
           mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+          maxBounds={LUZON_BOUNDS}
+          minZoom={6.8}
           reuseMaps
         />
       </DeckGL>

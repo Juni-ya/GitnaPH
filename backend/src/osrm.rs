@@ -24,8 +24,8 @@ pub struct OsrmTableResult {
 impl OsrmClient {
     pub fn new() -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .user_agent("GitnaRoadEngine/2.0 (Philippine Fair-Midpoint Calculator; contact@gitna.ph)")
+            .timeout(Duration::from_secs(6))
+            .user_agent("GitnaRoadEngine/3.0 (Philippine Fair-Midpoint Calculator; contact@gitna.ph)")
             .build()
             .unwrap_or_else(|_| Client::new());
         Self { client }
@@ -165,40 +165,58 @@ impl OsrmClient {
     /// Walk along real road polyline coordinates and find the exact coordinate
     /// at 50% cumulative road distance (and 50% duration).
     pub fn find_road_midpoint(coordinates: &[[f64; 2]]) -> [f64; 2] {
+        let sampled = Self::sample_polyline_at_fractions(coordinates, &[0.50]);
+        sampled.first().copied().unwrap_or([120.985, 14.58])
+    }
+
+    /// Sample road polyline at specific distance fractions (e.g. 0.40, 0.45, 0.50, 0.55, 0.60)
+    pub fn sample_polyline_at_fractions(coordinates: &[[f64; 2]], fractions: &[f64]) -> Vec<[f64; 2]> {
         if coordinates.len() < 2 {
-            return coordinates.first().copied().unwrap_or([120.985, 14.58]);
+            return fractions
+                .iter()
+                .map(|_| coordinates.first().copied().unwrap_or([120.985, 14.58]))
+                .collect();
         }
 
-        // Calculate total road polyline length
         let mut seg_lengths = Vec::with_capacity(coordinates.len() - 1);
         let mut total_len = 0.0;
-
         for i in 0..coordinates.len() - 1 {
-            let p1 = coordinates[i];
-            let p2 = coordinates[i + 1];
-            let len = approx_road_segment_meters(p1, p2);
+            let len = approx_road_segment_meters(coordinates[i], coordinates[i + 1]);
             seg_lengths.push(len);
             total_len += len;
         }
 
-        let half_dist = total_len * 0.50;
-        let mut accumulated = 0.0;
-
-        for (i, &len) in seg_lengths.iter().enumerate() {
-            if accumulated + len >= half_dist {
-                let remain = half_dist - accumulated;
-                let fraction = if len > 0.0 { remain / len } else { 0.5 };
-                let p1 = coordinates[i];
-                let p2 = coordinates[i + 1];
-                let lng = p1[0] + (p2[0] - p1[0]) * fraction;
-                let lat = p1[1] + (p2[1] - p1[1]) * fraction;
-                return [lng, lat];
-            }
-            accumulated += len;
+        if total_len <= 1.0 {
+            return fractions.iter().map(|_| coordinates[0]).collect();
         }
 
-        // Fallback to middle index
-        coordinates[coordinates.len() / 2]
+        let mut samples = Vec::with_capacity(fractions.len());
+        for &frac in fractions {
+            let target_dist = total_len * frac.clamp(0.01, 0.99);
+            let mut accumulated = 0.0;
+            let mut found = false;
+
+            for (i, &len) in seg_lengths.iter().enumerate() {
+                if accumulated + len >= target_dist {
+                    let remain = target_dist - accumulated;
+                    let f = if len > 0.0 { remain / len } else { 0.5 };
+                    let p1 = coordinates[i];
+                    let p2 = coordinates[i + 1];
+                    let lng = p1[0] + (p2[0] - p1[0]) * f;
+                    let lat = p1[1] + (p2[1] - p1[1]) * f;
+                    samples.push([lng, lat]);
+                    found = true;
+                    break;
+                }
+                accumulated += len;
+            }
+
+            if !found {
+                samples.push(coordinates.last().copied().unwrap_or([120.985, 14.58]));
+            }
+        }
+
+        samples
     }
 
     /// Slice a road polyline up to a given progress percentage (0.05 to 1.0)
@@ -245,8 +263,10 @@ impl OsrmClient {
     /// High-precision highway waypoint interpolation along major Philippine corridors
     /// (NLEX, Skyway Stage 3, EDSA, CAVITEX, SLEX) when OSRM API is rate-limited.
     fn synthesize_philippine_road(origin: [f64; 2], dest: [f64; 2]) -> OsrmRouteResult {
-        // Highway spine hubs in order North to South
         let spine = vec![
+            [120.5960, 15.1450], // Angeles City (Pampanga)
+            [120.6850, 15.0300], // San Fernando (Pampanga)
+            [120.7600, 14.9500], // Apalit / Calumpit
             [120.8113, 14.8527], // Malolos (Bulacan)
             [120.8650, 14.8210], // Guiguinto NLEX
             [120.9150, 14.7950], // Marilao NLEX
@@ -265,10 +285,12 @@ impl OsrmClient {
             [120.9427, 14.4642], // Bacoor CAVITEX Entry
             [120.9405, 14.4296], // Imus Aguinaldo Hwy
             [120.8808, 14.3879], // General Trias (Cavite)
+            [120.9300, 14.3200], // Dasmariñas (Cavite)
             [121.0422, 14.4234], // Alabang Filinvest
+            [121.0700, 14.3200], // Santa Rosa (Laguna)
+            [121.1500, 14.2100], // Calamba (Laguna)
         ];
 
-        // Find closest spine index for origin and dest
         let mut best_orig_idx = 0;
         let mut min_orig_dist = f64::MAX;
         let mut best_dest_idx = 0;
@@ -298,8 +320,6 @@ impl OsrmClient {
             }
         }
         path.push(dest);
-
-        // Deduplicate adjacent
         path.dedup();
 
         let mut total_dist_m = 0.0;
@@ -307,7 +327,6 @@ impl OsrmClient {
             total_dist_m += approx_road_segment_meters(path[i], path[i + 1]);
         }
 
-        // Philippine average urban/expressway driving speed ~ 38 km/h (10.5 m/s)
         let duration_secs = (total_dist_m / 10.5).max(300.0);
 
         OsrmRouteResult {

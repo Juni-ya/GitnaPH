@@ -45,6 +45,13 @@ struct GeocodeResult {
     lon: f64,
 }
 
+#[derive(Deserialize)]
+struct PoisQuery {
+    lng: f64,
+    lat: f64,
+    name: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
@@ -55,7 +62,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Initializing Gitna True Road-Pathing & OSRM Engine...");
+    info!("Initializing Gitna True Road-Pathing Engine (Luzon Edition)...");
     let osrm_client = Arc::new(OsrmClient::new());
     let poi_service = Arc::new(PoiService::new());
 
@@ -70,16 +77,17 @@ async fn main() {
         .allow_headers(Any);
 
     let app = Router::new()
+        .route("/health", get(health_handler))
         .route("/api/health", get(health_handler))
         .route("/api/hubs", get(get_hubs_handler))
-        .route("/api/presets", get(get_presets_handler))
+        .route("/api/pois", get(get_pois_handler))
         .route("/api/geocode", get(geocode_handler))
         .route("/ws/calculate", get(ws_calculate_handler))
         .layer(cors)
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
-    info!("🚀 Gitna V2 True Road Engine listening on http://{}", addr);
+    info!("Gitna True Road Engine listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -93,8 +101,8 @@ async fn main() {
 async fn health_handler() -> impl IntoResponse {
     Json(json!({
         "status": "online",
-        "service": "Gitna True Road-Path Midpoint Engine (V2)",
-        "version": "2.0.0",
+        "service": "Gitna True Road-Path Midpoint Engine (Luzon V3)",
+        "version": "3.0.0",
         "routing_engine": "OSRM Routing Engine + Overpass API",
         "unified_mode": "Real Road Highway Network (100% GeoJSON Polylines)",
     }))
@@ -104,7 +112,7 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
     Json(vec![
         CandidateHub {
             id: "sm_north".to_string(),
-            name: "SM North EDSA / TriNoma".to_string(),
+            name: "SM North EDSA / TriNoma (Quezon City)".to_string(),
             coordinates: [121.0333, 14.6538],
             category: "North Road Nexus".to_string(),
             description: "NLEX Mindanao Ave & EDSA North junction".to_string(),
@@ -112,10 +120,10 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
         },
         CandidateHub {
             id: "quezon_ave".to_string(),
-            name: "EDSA Quezon Avenue".to_string(),
+            name: "EDSA Quezon Avenue (Quezon City)".to_string(),
             coordinates: [121.0400, 14.6420],
             category: "Quezon City Central".to_string(),
-            description: "EDSA & Quezon Ave flyover interchange".to_string(),
+            description: "EDSA & Quezon Ave interchange".to_string(),
             metro_zone: "Quezon City".to_string(),
         },
         CandidateHub {
@@ -139,7 +147,7 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
             name: "BGC Market! Market! / High Street".to_string(),
             coordinates: [121.0550, 14.5490],
             category: "East Expressway Corridor".to_string(),
-            description: "C5 highway arterial & Kalayaan elevated flyover access".to_string(),
+            description: "C5 highway arterial & elevated flyover access".to_string(),
             metro_zone: "Taguig BGC".to_string(),
         },
         CandidateHub {
@@ -147,7 +155,7 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
             name: "Ayala Center / One Ayala (Makati)".to_string(),
             coordinates: [121.0286, 14.5503],
             category: "Premier Intermodal CBD".to_string(),
-            description: "Skyway Stage 3 / Osmeña Highway & EDSA South nexus".to_string(),
+            description: "Skyway Stage 3 / Osmena Highway & EDSA South nexus".to_string(),
             metro_zone: "Makati CBD".to_string(),
         },
         CandidateHub {
@@ -160,7 +168,7 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
         },
         CandidateHub {
             id: "moa".to_string(),
-            name: "SM Mall of Asia (MOA Bay Area)".to_string(),
+            name: "SM Mall of Asia (Bay Area)".to_string(),
             coordinates: [120.9822, 14.5354],
             category: "Coastal Expressway Nexus".to_string(),
             description: "CAVITEX Pacific Drive & EDSA South terminus".to_string(),
@@ -172,7 +180,7 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
             coordinates: [120.9897, 14.5240],
             category: "Entertainment City Arterial".to_string(),
             description: "Macapagal Blvd & NAIA Expressway link to CAVITEX".to_string(),
-            metro_zone: "Aseana / Parañaque".to_string(),
+            metro_zone: "Aseana / Paranaque".to_string(),
         },
         CandidateHub {
             id: "alabang".to_string(),
@@ -190,115 +198,63 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
             description: "Samson Road, Rizal Ave & McArthur Hwy confluence".to_string(),
             metro_zone: "North CAMANAVA".to_string(),
         },
-        CandidateHub {
-            id: "intramuros".to_string(),
-            name: "Intramuros / Rizal Park".to_string(),
-            coordinates: [120.9762, 14.5878],
-            category: "Historic Capital Nexus".to_string(),
-            description: "Roxas Boulevard & Bonifacio Drive coastal corridor".to_string(),
-            metro_zone: "City of Manila".to_string(),
-        },
     ])
 }
 
-async fn get_presets_handler() -> impl IntoResponse {
-    Json(json!([
-        {
-            "id": "classic_debate",
-            "name": "Classic Debate: Malolos vs. Gen Tri Cavite",
-            "description": "Person A in Malolos, Bulacan vs Person B in Gen Trias, Cavite arguing between SM North and Mall of Asia.",
-            "participants": [
-                {
-                    "id": "user_bulacan",
-                    "name": "Person A (Malolos, Bulacan)",
-                    "coordinates": [120.8113, 14.8527],
-                    "color": "#00f0ff"
-                },
-                {
-                    "id": "user_cavite",
-                    "name": "Person B (Gen. Trias, Cavite)",
-                    "coordinates": [120.8808, 14.3879],
-                    "color": "#ff007f"
-                }
-            ],
-            "weights": {
-                "alpha": 0.45,
-                "beta": 0.55
-            }
-        },
-        {
-            "id": "tri_corridor_meetup",
-            "name": "Tri-Corridor Meetup: Bulacan + Cavite + Rizal",
-            "description": "North (Bocaue), South (Bacoor), and East (Antipolo/C5 Libis) highway convergence.",
-            "participants": [
-                {
-                    "id": "user_bulacan",
-                    "name": "North (Bocaue, Bulacan)",
-                    "coordinates": [120.9482, 14.7736],
-                    "color": "#00f0ff"
-                },
-                {
-                    "id": "user_cavite",
-                    "name": "South (Bacoor, Cavite)",
-                    "coordinates": [120.9427, 14.4642],
-                    "color": "#ff007f"
-                },
-                {
-                    "id": "user_rizal",
-                    "name": "East (Eastwood / C5 Libis)",
-                    "coordinates": [121.0805, 14.6094],
-                    "color": "#ffb800"
-                }
-            ],
-            "weights": {
-                "alpha": 0.40,
-                "beta": 0.60
-            }
-        }
-    ]))
+async fn get_pois_handler(
+    Query(query): Query<PoisQuery>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let pois = state
+        .poi_service
+        .fetch_pois_for_midpoint(
+            [query.lng, query.lat],
+            query.name.as_deref().unwrap_or("Calculated Midpoint"),
+        )
+        .await;
+    Json(pois)
 }
 
 async fn geocode_handler(Query(query): Query<GeocodeQuery>) -> impl IntoResponse {
     let client = reqwest::Client::builder()
-        .user_agent("GitnaRoadEngine/2.0 (contact@gitna.ph)")
+        .user_agent("GitnaRoadEngine/3.0 (contact@gitna.ph)")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
+    // Bounded strictly to Luzon: viewbox=119.40,18.75,124.60,12.40&bounded=1&countrycodes=ph
     let url = format!(
-        "https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&limit=5&q={}",
+        "https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&viewbox=119.40,18.75,124.60,12.40&bounded=1&limit=8&q={}",
         urlencoding(&query.q)
     );
 
     match client.get(&url).send().await {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                if let Ok(json_val) = resp.json::<serde_json::Value>().await {
-                    let mut results = Vec::new();
-                    if let Some(arr) = json_val.as_array() {
-                        for item in arr {
-                            if let (Some(name), Some(display), Some(lat_str), Some(lon_str)) = (
-                                item["name"].as_str().or(item["display_name"].as_str()),
-                                item["display_name"].as_str(),
-                                item["lat"].as_str(),
-                                item["lon"].as_str(),
-                            ) {
-                                if let (Ok(lat), Ok(lon)) = (lat_str.parse::<f64>(), lon_str.parse::<f64>()) {
-                                    results.push(GeocodeResult {
-                                        name: name.to_string(),
-                                        display_name: display.to_string(),
-                                        lat,
-                                        lon,
-                                    });
-                                }
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(json_val) = resp.json::<serde_json::Value>().await {
+                let mut results = Vec::new();
+                if let Some(arr) = json_val.as_array() {
+                    for item in arr {
+                        if let (Some(name), Some(display), Some(lat_str), Some(lon_str)) = (
+                            item["name"].as_str().or(item["display_name"].as_str()),
+                            item["display_name"].as_str(),
+                            item["lat"].as_str(),
+                            item["lon"].as_str(),
+                        ) {
+                            if let (Ok(lat), Ok(lon)) = (lat_str.parse::<f64>(), lon_str.parse::<f64>()) {
+                                results.push(GeocodeResult {
+                                    name: name.to_string(),
+                                    display_name: display.to_string(),
+                                    lat,
+                                    lon,
+                                });
                             }
                         }
                     }
-                    return Json(json!({ "results": results })).into_response();
                 }
+                return Json(json!({ "results": results })).into_response();
             }
             Json(json!({ "results": [] })).into_response()
         }
-        Err(_) => Json(json!({ "results": [] })).into_response(),
+        _ => Json(json!({ "results": [] })).into_response(),
     }
 }
 
@@ -329,7 +285,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
     while let Some(msg_result) = ws_receiver.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                info!("Received WS calculate text payload: {}", text);
+                info!("Received calculation request: {}", text);
                 match serde_json::from_str::<CalculationRequest>(&text) {
                     Ok(req) => {
                         if req.action == "START_CALCULATION" {
@@ -339,7 +295,6 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                             let participants = req.participants;
                             let weights = req.weights.unwrap_or_default();
 
-                            // Spawn the computation engine task
                             tokio::spawn(async move {
                                 run_true_road_engine(
                                     &osrm_clone,
@@ -351,7 +306,6 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                                 .await;
                             });
 
-                            // Stream events to WebSocket client
                             while let Some(event) = rx.recv().await {
                                 if let Ok(json_str) = serde_json::to_string(&event) {
                                     if ws_sender.send(Message::Text(json_str)).await.is_err() {
