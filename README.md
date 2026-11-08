@@ -8,11 +8,14 @@ Gitna determines the fairest meetup location between multiple travelers along th
 
 ## Features
 
+- **Strictly 2D Overhead Plane:** Map canvas and Deck.gl layers locked to a flat 2D projection (`pitch: 0, bearing: 0`) with tilt and rotation disabled.
 - **True Road Geometry:** Powered by live OSRM routing and polylines (`LineString` GeoJSON) along real expressways and arterial corridors (NLEX, Skyway Stage 3, EDSA, CAVITEX, SLEX).
-- **Direct Highway Midpoint Slicing:** Walks road polylines to extract the exact 50% cumulative distance coordinate directly on the highway.
+- **Direct Highway Midpoint Slicing:** Walks road polylines to extract the exact 50% cumulative distance coordinate directly on the highway as a search anchor.
+- **Real Radius Place Finder (2,000m to 5,000m):** Queries real places around the road anchor using Google Places API (New) or OpenStreetMap Nominatim and Overpass. Zero synthetic or fake venues.
+- **Venue Snapping & Dynamic Re-Routing:** Automatically snaps the recommended meetup spot to a real venue, routing road polylines directly to its coordinates. Clicking any alternative hub or venue card triggers instant on-the-fly re-routing via `POST /api/route-to-point`.
+- **Luzon Map Lock & Town Center Autofill:** Map bounds locked to Luzon (`minZoom: 6.8`) with an inverse mask polygon and instant autocomplete for 100+ Luzon town and city centers.
 - **Minimax Fairness Scoring:** Optimizes for arrival equality and minimal total commute time across all travelers.
-- **Real-Time Visual Highway Tracing:** Streams calculation frames at 60 FPS over WebSockets to Deck.gl and MapLibre GL hardware-accelerated layers.
-- **Nearby Venue Discovery:** Identifies cafes, parks, and malls within 800 meters of the winning road node via Overpass API.
+- **Real-Time Visual Highway Tracing:** Streams calculation frames over WebSockets to Deck.gl and MapLibre GL hardware-accelerated layers.
 
 ---
 
@@ -22,10 +25,10 @@ Gitna determines the fairest meetup location between multiple travelers along th
 |---|---|---|
 | **Backend** | Rust, Axum, Tokio | High-concurrency routing engine and WebSocket streaming server |
 | **Routing** | OSRM Table & Route APIs | Real-world driving durations, distances, and highway geometries |
-| **Venues** | Overpass API (OSM) | POI queries within an 800m radius of convergence hubs |
+| **Places Engine** | Google Places API + OSM / Nominatim | Multi-engine real place discovery within a 2,000m-5,000m radius |
 | **Frontend** | React 18, TypeScript, Vite | Single-page client with interactive parameter controls |
-| **Map Rendering** | Deck.gl, MapLibre GL | WebGL PathLayer and ScatterplotLayer visualizations |
-| **Base Map** | CartoDB Dark Matter | Clean, high-contrast dark vector basemap |
+| **Map Rendering** | Deck.gl, MapLibre GL | Strict 2D WebGL PathLayer and ScatterplotLayer visualizations |
+| **Base Map** | CartoDB Dark Matter | Clean, high-contrast dark vector basemap with Luzon mask |
 | **Design System** | Tailwind CSS | Concentric border radii, dark zinc palette, electric lime accents |
 
 ---
@@ -37,10 +40,10 @@ SaanMeet/
 ├── backend/                       # Rust routing & streaming engine
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs                # Axum HTTP & WebSocket (/ws/calculate) routes
+│       ├── main.rs                # Axum HTTP, WebSocket (/ws/calculate), and route-to-point API
 │       ├── osrm.rs                # OSRM Table, Route API, and highway slicing
 │       ├── algorithm.rs           # Minimax commute cost and streaming pipeline
-│       ├── poi.rs                 # Overpass POI service with Metro Manila fallback
+│       ├── places.rs              # Dual-engine real place lookup (Google Places + OSM)
 │       └── models.rs              # Protocol and data structures
 │
 └── frontend/                      # React + TypeScript client
@@ -54,11 +57,12 @@ SaanMeet/
         ├── hooks/
         │   └── useWebSocket.ts    # WebSocket client state machine
         └── components/
-            ├── MapCanvas.tsx      # Deck.gl & MapLibre map viewport
+            ├── MapCanvas.tsx      # Strict 2D Deck.gl & MapLibre map viewport
             ├── ControlDock.tsx    # Traveler configuration dock
             ├── TelemetryBanner.tsx# Real-time calculation HUD
             ├── VerdictDrawer.tsx  # Drive receipt and podium breakdown
-            └── VenueExplorer.tsx  # Nearby POI list with walking estimates
+            ├── VenueExplorer.tsx  # Real venue directory with Google Maps links
+            └── LandingPage.tsx    # Clean introductory portal with API key setup
 ```
 
 ---

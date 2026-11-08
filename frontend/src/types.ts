@@ -57,6 +57,7 @@ export interface RoadCandidateVerdict {
   reason: string;
   rank: number;
   area_name?: string;
+  snapped_venue?: PoiItem;
 }
 
 export type SpotCategory = 'cafe' | 'mall' | 'park' | 'restaurant';
@@ -70,6 +71,10 @@ export interface PoiItem {
   walking_minutes: number;
   address?: string;
   highlight?: string;
+  rating?: number;
+  user_rating_count?: number;
+  google_maps_uri?: string;
+  source?: 'google_places' | 'osm';
 }
 
 export interface CategorizedPois {
@@ -77,6 +82,9 @@ export interface CategorizedPois {
   malls: PoiItem[];
   parks: PoiItem[];
   restaurants: PoiItem[];
+  search_anchor?: [number, number];
+  search_radius_meters?: number;
+  recommended_place?: PoiItem;
 }
 
 export interface TestedCandidateFrame {
@@ -99,6 +107,16 @@ export interface FinalRoadVerdictPayload {
   pois: CategorizedPois;
   analysis_commentary: string;
   total_calc_time_ms: number;
+}
+
+export interface RouteToPointResponse {
+  target_name: string;
+  target_coords: [number, number];
+  user_road_routes: UserRoadRoute[];
+  user_metrics: UserRoadMetric[];
+  total_road_time_mins: number;
+  delta_road_mins: number;
+  fairness_score: number;
 }
 
 export type StreamEvent =

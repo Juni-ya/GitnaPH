@@ -28,6 +28,8 @@ interface MapCanvasProps {
   selectedPoi: PoiItem | null;
   onSelectPoi?: (poi: PoiItem) => void;
   categoryFilter?: CategoryFilter;
+  activeRoutes?: UserRoadRoute[] | null;
+  selectedTargetCoords?: [number, number] | null;
 }
 
 // Luzon Philippines Bounding Envelope: [[119.40, 12.40], [124.60, 18.75]]
@@ -36,12 +38,15 @@ const LUZON_BOUNDS: [[number, number], [number, number]] = [
   [124.60, 18.75],
 ];
 
+// STRICT 2D MAP PLANE ONLY: pitch: 0, bearing: 0
 const INITIAL_VIEW_STATE = {
   longitude: 121.00,
   latitude: 14.65,
   zoom: 8.8,
-  pitch: 35,
-  bearing: -4,
+  pitch: 0,
+  bearing: 0,
+  maxPitch: 0,
+  minPitch: 0,
   maxZoom: 18,
   minZoom: 6.8,
 };
@@ -50,7 +55,6 @@ const INITIAL_VIEW_STATE = {
 const LUZON_INVERSE_MASK = [
   {
     polygon: [
-      // Outer ring (world extent)
       [
         [-180, -90],
         [180, -90],
@@ -58,7 +62,6 @@ const LUZON_INVERSE_MASK = [
         [-180, 90],
         [-180, -90],
       ],
-      // Inner ring (Luzon viewport window)
       [
         [119.40, 12.40],
         [124.60, 12.40],
@@ -90,6 +93,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   selectedPoi,
   onSelectPoi,
   categoryFilter = 'all',
+  activeRoutes,
+  selectedTargetCoords,
 }) => {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [pulseTime, setPulseTime] = useState(0);
@@ -106,19 +111,39 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, []);
 
-  // Smooth camera flyTo to zoom 14.5 when winner midpoint is determined
+  // Smooth 2D camera pan to zoom 14.5 when winner midpoint is determined (Rule 1: STRICT 2D PLANE)
   useEffect(() => {
     if (winnerVerdict) {
+      const targetCoords = winnerVerdict.snapped_venue
+        ? winnerVerdict.snapped_venue.coordinates
+        : winnerVerdict.hub_coords;
+
       setViewState((prev) => ({
         ...prev,
-        longitude: winnerVerdict.hub_coords[0],
-        latitude: winnerVerdict.hub_coords[1],
-        zoom: 14.5,
-        pitch: 45,
-        transitionDuration: 2000,
+        longitude: targetCoords[0],
+        latitude: targetCoords[1],
+        zoom: 14.2,
+        pitch: 0,
+        bearing: 0,
+        transitionDuration: 1600,
       }));
     }
   }, [winnerVerdict]);
+
+  // Smooth 2D pan/zoom when user clicks an alternative zone or venue card (Rule 3)
+  useEffect(() => {
+    if (selectedTargetCoords) {
+      setViewState((prev) => ({
+        ...prev,
+        longitude: selectedTargetCoords[0],
+        latitude: selectedTargetCoords[1],
+        zoom: 14.5,
+        pitch: 0,
+        bearing: 0,
+        transitionDuration: 1000,
+      }));
+    }
+  }, [selectedTargetCoords]);
 
   // Filter POIs by active category filter without re-running calculation
   const filteredPois = useMemo(() => {
@@ -126,11 +151,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     return pois.filter((p) => p.category === categoryFilter);
   }, [pois, categoryFilter]);
 
-  // Deck.gl Layers (100% Real Road Network Polylines - Zero Straight Lines)
+  // Which routes are active on the map: dynamically updated routes or verdict routes
+  const currentRenderRoutes = useMemo(() => {
+    if (activeRoutes && activeRoutes.length > 0) return activeRoutes;
+    if (winnerVerdict && winnerVerdict.user_road_routes.length > 0) return winnerVerdict.user_road_routes;
+    return [];
+  }, [activeRoutes, winnerVerdict]);
+
+  // Deck.gl 2D Layers (STRICT 2D PLANE ONLY - Zero 3D ArcLayer, Zero 3D Buildings)
   const layers = useMemo(() => {
     const list: any[] = [];
 
-    // 0. Luzon Dark Inverse Mask Polygon (Rule 2)
+    // 0. Luzon Dark Inverse Mask Polygon (Rule 4)
     list.push(
       new PolygonLayer({
         id: 'luzon-inverse-mask',
@@ -221,12 +253,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 3. Stage 3: Final Winner Road Polylines (OSRM Highway Traces)
-    if (winnerVerdict && winnerVerdict.user_road_routes.length > 0) {
+    // 3. Stage 3 & Dynamic Re-Routing: Active Road Routes (OSRM Highway Traces to winning place or selected venue)
+    if (currentRenderRoutes.length > 0) {
       list.push(
         new PathLayer({
           id: 'winner-road-routes-glow',
-          data: winnerVerdict.user_road_routes,
+          data: currentRenderRoutes,
           getPath: (d: UserRoadRoute) => d.coordinates,
           getColor: (d: UserRoadRoute) => hexToRgba(d.color, 85),
           getWidth: 65,
@@ -236,7 +268,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         }),
         new PathLayer({
           id: 'winner-road-routes-core',
-          data: winnerVerdict.user_road_routes,
+          data: currentRenderRoutes,
           getPath: (d: UserRoadRoute) => d.coordinates,
           getColor: (d: UserRoadRoute) => hexToRgba(d.color, 255),
           getWidth: 26,
@@ -245,14 +277,17 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           pickable: true,
         })
       );
+    }
 
-      // Winning Midpoint Beacon with Electric Lime Accent [204, 255, 0] (#CCFF00)
+    // 4. Winning Midpoint Beacon with Electric Lime Accent [204, 255, 0] (#CCFF00)
+    if (winnerVerdict) {
+      const activeMidpointPos = selectedTargetCoords || (winnerVerdict.snapped_venue ? winnerVerdict.snapped_venue.coordinates : winnerVerdict.hub_coords);
       const haloRadius = 700 + Math.sin(pulseTime * 3) * 180;
       list.push(
         new ScatterplotLayer({
           id: 'winner-halo-layer',
-          data: [winnerVerdict],
-          getPosition: (d: RoadCandidateVerdict) => d.hub_coords,
+          data: [{ coords: activeMidpointPos }],
+          getPosition: (d: any) => d.coords,
           getRadius: haloRadius,
           radiusMinPixels: 16,
           radiusMaxPixels: 32,
@@ -263,8 +298,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         }),
         new ScatterplotLayer({
           id: 'winner-core-layer',
-          data: [winnerVerdict],
-          getPosition: (d: RoadCandidateVerdict) => d.hub_coords,
+          data: [{ coords: activeMidpointPos }],
+          getPosition: (d: any) => d.coords,
           getRadius: 220,
           radiusMinPixels: 7,
           radiusMaxPixels: 12,
@@ -273,7 +308,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 4. Candidate Hubs Markers
+    // 5. Candidate Hubs Markers
     if (hubs.length > 0) {
       list.push(
         new ScatterplotLayer({
@@ -297,14 +332,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 5. POIs Pins Physically Surrounding Midpoint (Cafes, Malls, Parks, Restaurants)
+    // 6. Real POIs Pins (Cafes, Malls, Parks, Restaurants - REAL API LOOKUP ONLY)
     if (filteredPois.length > 0) {
       list.push(
         new ScatterplotLayer({
           id: 'pois-layer',
           data: filteredPois,
           getPosition: (d: PoiItem) => d.coordinates,
-          getRadius: 110,
+          getRadius: 120,
           radiusMinPixels: 5,
           radiusMaxPixels: 10,
           getFillColor: (d: PoiItem) => {
@@ -327,7 +362,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     }
 
-    // 6. Participant Origin Pins
+    // 7. Participant Origin Pins
     if (participants.length > 0) {
       list.push(
         new ScatterplotLayer({
@@ -360,10 +395,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     crawlingPolylines,
     phase,
     currentCandidate,
+    currentRenderRoutes,
     winnerVerdict,
     hubs,
     filteredPois,
     selectedPoi,
+    selectedTargetCoords,
     onSelectPoi,
     participants,
     pulseTime,
@@ -410,16 +447,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       };
     }
 
-    // POI Tooltip
+    // Real POI Tooltip
     if (obj.category && obj.walking_minutes !== undefined) {
       const catLabel = obj.category.charAt(0).toUpperCase() + obj.category.slice(1);
+      const ratingInfo = obj.rating ? ` • <span style="color: #fbbf24;">${obj.rating} stars</span> (${obj.user_rating_count || 0})` : '';
       return {
         html: `<div style="${baseStyle}">
           <div style="font-weight: 600; color: #f4f4f5;">${obj.name}</div>
           <div style="font-size: 11px; color: #a1a1aa;">
-            ${catLabel} • <span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.distance_meters || 300}m</span> (<span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.walking_minutes}</span> min walk)
+            ${catLabel} • <span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.distance_meters || 300}m</span> (<span style="font-family: JetBrains Mono, monospace; font-variant-numeric: tabular-nums; color: #e4e4e7;">${obj.walking_minutes}</span> min walk)${ratingInfo}
           </div>
-          ${obj.highlight ? `<div style="font-size: 11px; color: #71717a; margin-top: 2px;">${obj.highlight}</div>` : ''}
+          ${obj.address ? `<div style="font-size: 11px; color: #71717a; margin-top: 2px;">${obj.address}</div>` : ''}
+          ${obj.highlight ? `<div style="font-size: 10px; color: #a1a1aa; margin-top: 2px;">${obj.highlight}</div>` : ''}
         </div>`,
       };
     }
@@ -431,14 +470,34 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     <div className="relative w-full h-full bg-zinc-950">
       <DeckGL
         viewState={viewState as any}
-        onViewStateChange={({ viewState: newViewState }: any) => setViewState(newViewState)}
-        controller={{ doubleClickZoom: false, dragRotate: true }}
+        onViewStateChange={({ viewState: newViewState }: any) => {
+          // Strictly lock pitch and bearing to 0 (Rule 1)
+          setViewState({
+            ...newViewState,
+            pitch: 0,
+            bearing: 0,
+            maxPitch: 0,
+            minPitch: 0,
+          });
+        }}
+        controller={{
+          doubleClickZoom: false,
+          dragRotate: false,
+          touchRotate: false,
+        }}
         layers={layers}
         getTooltip={getTooltip}
       >
         <Map
           mapLib={maplibregl}
           mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+          pitch={0}
+          bearing={0}
+          maxPitch={0}
+          minPitch={0}
+          dragRotate={false}
+          pitchWithRotate={false}
+          touchPitch={false}
           maxBounds={LUZON_BOUNDS}
           minZoom={6.8}
           reuseMaps

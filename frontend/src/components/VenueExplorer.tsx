@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Coffee, Trees, ShoppingBag, UtensilsCrossed, MapPin, Footprints, Layers } from 'lucide-react';
+import { Coffee, Trees, ShoppingBag, UtensilsCrossed, MapPin, Footprints, Layers, Star, ExternalLink } from 'lucide-react';
 import { CategorizedPois, CategoryFilter, PoiItem } from '../types';
 
 interface VenueExplorerProps {
@@ -123,15 +123,15 @@ export const VenueExplorer: React.FC<VenueExplorerProps> = ({
       </div>
 
       {/* Venues Grid / List */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
         {isLoading ? (
           <>
-            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 skeleton-shimmer h-20" />
-            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 skeleton-shimmer h-20" />
+            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 skeleton-shimmer h-24" />
+            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 skeleton-shimmer h-24" />
           </>
         ) : filteredItems.length === 0 ? (
           <div className="col-span-2 py-6 text-center text-xs text-zinc-500">
-            No venues found in this category within 1.5 km of the midpoint.
+            No real venues found in this category within search radius.
           </div>
         ) : (
           filteredItems.map((poi) => {
@@ -142,36 +142,61 @@ export const VenueExplorer: React.FC<VenueExplorerProps> = ({
                 onClick={() => onSelectPoi && onSelectPoi(poi)}
                 className={`p-3 rounded-xl border transition cursor-pointer text-left flex flex-col justify-between active:scale-[0.98] ${
                   isSelected
-                    ? 'bg-zinc-800 border-lime-400/80 ring-1 ring-lime-400/50'
+                    ? 'bg-zinc-800 border-lime-400/80 ring-1 ring-lime-400/50 shadow-sm'
                     : 'bg-zinc-900/70 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900'
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="text-xs font-semibold text-zinc-100 truncate flex items-center gap-1.5">
+                <div className="space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-xs font-semibold text-zinc-100 truncate flex items-center gap-1.5 flex-1 min-w-0">
                       <MapPin size={15} strokeWidth={1.75} className="text-zinc-400 shrink-0" />
                       <span className="truncate">{poi.name}</span>
                     </h4>
-                    {poi.highlight && (
-                      <p className="text-[11px] text-zinc-400 mt-1 line-clamp-2 text-pretty leading-relaxed">
-                        {poi.highlight}
-                      </p>
+
+                    {poi.google_maps_uri && (
+                      <a
+                        href={poi.google_maps_uri}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-zinc-500 hover:text-zinc-300 transition shrink-0"
+                        title="Open in Google Maps"
+                      >
+                        <ExternalLink size={13} strokeWidth={1.75} />
+                      </a>
                     )}
                   </div>
 
-                  <span className="shrink-0 px-2 py-0.5 rounded-lg text-[11px] bg-zinc-950/80 text-zinc-300 border border-zinc-800 flex items-center gap-1">
-                    <Footprints size={13} strokeWidth={1.75} className="text-zinc-400" />
-                    <span>
-                      <span className="tabular-nums font-mono text-zinc-200">{poi.walking_minutes}</span> min
-                    </span>
-                  </span>
+                  {poi.rating && (
+                    <div className="flex items-center gap-1 text-[11px] text-amber-400">
+                      <Star size={12} strokeWidth={2} className="fill-amber-400" />
+                      <span className="tabular-nums font-mono font-medium">{poi.rating.toFixed(1)}</span>
+                      {poi.user_rating_count && (
+                        <span className="text-zinc-500 tabular-nums font-mono text-[10px]">
+                          ({poi.user_rating_count})
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {poi.highlight && (
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 text-pretty leading-relaxed">
+                      {poi.highlight}
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-zinc-500 mt-2">
-                  <span className="truncate max-w-[170px]">{poi.address || 'Midpoint Zone'}</span>
-                  <span className="tabular-nums font-mono text-zinc-400 shrink-0">
-                    {poi.distance_meters}m
-                  </span>
+                <div className="flex items-center justify-between text-[11px] text-zinc-500 mt-2.5 pt-2 border-t border-zinc-800/60">
+                  <span className="truncate max-w-[150px]">{poi.address || 'Local Corridor'}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="flex items-center gap-1 text-zinc-400">
+                      <Footprints size={12} strokeWidth={1.75} className="text-zinc-500" />
+                      <span className="tabular-nums font-mono">{poi.walking_minutes}</span>m
+                    </span>
+                    <span className="tabular-nums font-mono text-zinc-300 font-medium">
+                      {poi.distance_meters}m
+                    </span>
+                  </div>
                 </div>
               </div>
             );

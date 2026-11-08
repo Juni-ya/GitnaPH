@@ -136,7 +136,7 @@ export function useWebSocket(url: string = 'ws://localhost:4000/ws/calculate') {
   }, [connect]);
 
   const startCalculation = useCallback(
-    (participants: Participant[], weights: CalculationWeights) => {
+    (participants: Participant[], weights: CalculationWeights, googleApiKey?: string) => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         setErrorMessage('Road Engine WebSocket is currently offline.');
         return;
@@ -156,6 +156,7 @@ export function useWebSocket(url: string = 'ws://localhost:4000/ws/calculate') {
         action: 'START_CALCULATION',
         participants,
         weights,
+        google_api_key: googleApiKey || undefined,
       };
 
       wsRef.current.send(JSON.stringify(payload));

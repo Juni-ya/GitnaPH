@@ -6,16 +6,17 @@ use tracing::info;
 
 use crate::models::{
     CalculationWeights, CandidateHub, PartialPolyline, Participant,
-    RoadCandidateVerdict, StreamEvent, UserRoadMetric, UserRoadRoute,
+    RoadCandidateVerdict, RouteToPointResponse, StreamEvent, UserRoadMetric, UserRoadRoute,
 };
 use crate::osrm::OsrmClient;
-use crate::poi::PoiService;
+use crate::places::PlacesService;
 
 pub async fn run_true_road_engine(
     osrm_client: &OsrmClient,
-    poi_service: &PoiService,
+    places_service: &PlacesService,
     participants: Vec<Participant>,
     weights: CalculationWeights,
+    google_api_key: Option<String>,
     tx: Sender<StreamEvent>,
 ) {
     let start_time = Instant::now();
@@ -308,6 +309,7 @@ pub async fn run_true_road_engine(
             reason: reason.clone(),
             rank: rank_idx + 1,
             area_name: None,
+            snapped_venue: None,
         };
 
         top_verdicts.push(verdict);
@@ -332,23 +334,46 @@ pub async fn run_true_road_engine(
     }
 
     // -------------------------------------------------------------
-    // STEP 5: Final Verdict & Accurate Nearby Spot Query (1500m)
+    // STEP 5: Real Radius Place Search & Snapping to Real Venue
     // -------------------------------------------------------------
     let mut winner = top_verdicts.remove(0);
     let alternatives = top_verdicts;
 
     // Reverse geocode winning coordinate for human-readable neighborhood/road
-    let area_name = poi_service.reverse_geocode(winner.hub_coords).await;
+    let area_name = places_service.reverse_geocode(winner.hub_coords).await;
     winner.area_name = area_name;
 
     info!(
-        "Querying Overpass spots around winning coordinate [{:.5}, {:.5}] for '{}'...",
+        "Performing 2D Real Radius Place Search around [{:.5}, {:.5}] for '{}'...",
         winner.hub_coords[0], winner.hub_coords[1], winner.hub_name
     );
 
-    let pois = poi_service
-        .fetch_pois_for_midpoint(winner.hub_coords, &winner.hub_name)
+    let pois = places_service
+        .search_places_around_anchor(winner.hub_coords, google_api_key.as_deref())
         .await;
+
+    // Rule 2: Snap to Real Recommended Meeting Place and route polylines directly to it
+    if let Some(snapped) = &pois.recommended_place {
+        info!(
+            "Snapping road route directly to recommended real venue '{}' at [{:.5}, {:.5}]",
+            snapped.name, snapped.coordinates[0], snapped.coordinates[1]
+        );
+
+        let snapped_target = calculate_routes_to_point(
+            osrm_client,
+            &snapped.name,
+            snapped.coordinates,
+            &participants,
+        )
+        .await;
+
+        winner.snapped_venue = Some(snapped.clone());
+        winner.user_road_routes = snapped_target.user_road_routes;
+        winner.user_metrics = snapped_target.user_metrics;
+        winner.total_road_time_mins = snapped_target.total_road_time_mins;
+        winner.delta_road_mins = snapped_target.delta_road_mins;
+        winner.fairness_score = snapped_target.fairness_score;
+    }
 
     let analysis_commentary = format!(
         "This highway midpoint balances the commute across all {} travelers with only {:.1} min disparity ({}% fairness score). Total driving time is {:.0} min across the group.",
@@ -374,6 +399,63 @@ pub async fn run_true_road_engine(
             total_calc_time_ms,
         })
         .await;
+}
+
+/// Calculate real OSRM driving routes from all participants to a specific target point/venue
+pub async fn calculate_routes_to_point(
+    osrm_client: &OsrmClient,
+    target_name: &str,
+    target_coords: [f64; 2],
+    participants: &[Participant],
+) -> RouteToPointResponse {
+    let mut user_road_routes = Vec::with_capacity(participants.len());
+    let mut user_metrics = Vec::with_capacity(participants.len());
+    let mut total_time = 0.0;
+    let mut times = Vec::with_capacity(participants.len());
+
+    for p in participants {
+        let route = osrm_client.fetch_route(p.coordinates, target_coords).await;
+        let time_m = (route.duration_secs / 60.0 * 10.0).round() / 10.0;
+        let dist_k = (route.distance_meters / 1000.0 * 10.0).round() / 10.0;
+        total_time += time_m;
+        times.push(time_m);
+
+        user_road_routes.push(UserRoadRoute {
+            participant_id: p.id.clone(),
+            participant_name: p.name.clone(),
+            coordinates: route.coordinates,
+            road_time_mins: time_m,
+            road_distance_km: dist_k,
+            color: p.color.clone(),
+        });
+
+        user_metrics.push(UserRoadMetric {
+            participant_id: p.id.clone(),
+            participant_name: p.name.clone(),
+            road_time_mins: time_m,
+            road_distance_km: dist_k,
+            color: p.color.clone(),
+        });
+    }
+
+    let min_t = times.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_t = times.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let delta = ((max_t - min_t) * 10.0).round() / 10.0;
+    let fairness = if max_t > 0.0 {
+        (100.0 - (delta / max_t * 100.0)).clamp(0.0, 100.0).round()
+    } else {
+        100.0
+    };
+
+    RouteToPointResponse {
+        target_name: target_name.to_string(),
+        target_coords,
+        user_road_routes,
+        user_metrics,
+        total_road_time_mins: total_time,
+        delta_road_mins: delta,
+        fairness_score: fairness,
+    }
 }
 
 fn get_luzon_corridor_hubs() -> Vec<CandidateHub> {

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Trash2, Route, Coffee, ShoppingBag, Trees, UtensilsCrossed, Compass } from 'lucide-react';
+import { Plus, Trash2, Route, Coffee, ShoppingBag, Trees, UtensilsCrossed, Compass, Key } from 'lucide-react';
 import { Participant, SpotCategory } from '../types';
 import { TownAutocomplete } from './TownAutocomplete';
 
@@ -11,6 +11,8 @@ interface LandingPageProps {
   setSelectedCategories: React.Dispatch<React.SetStateAction<SpotCategory[]>>;
   onSubmit: () => void;
   isCalculating: boolean;
+  googleApiKey?: string;
+  setGoogleApiKey?: React.Dispatch<React.SetStateAction<string>>;
 }
 
 const PARTICIPANT_COLORS = ['#38bdf8', '#f43f5e', '#fbbf24', '#a855f7', '#34d399', '#f97316'];
@@ -22,7 +24,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   setSelectedCategories,
   onSubmit,
   isCalculating,
+  googleApiKey = '',
+  setGoogleApiKey,
 }) => {
+  const [showKeyInput, setShowKeyInput] = useState(false);
+
   const handleUpdateTown = (index: number, townName: string, coords: [number, number]) => {
     setParticipants((prev) => {
       const next = [...prev];
@@ -101,14 +107,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <Compass size={16} strokeWidth={1.75} className="text-lime-400" />
             <span className="font-semibold text-zinc-300">Gitna Luzon</span>
             <span className="text-zinc-600">•</span>
-            <span>Real Road Network</span>
+            <span>2D Road Network & Real Radius Finder</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100 text-balance">
             Find the Fairest Road Midpoint in Luzon
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed text-pretty">
-            Enter two or more Luzon towns to trace the real highway network and find the most balanced meetup spot.
+            Enter two or more Luzon towns to trace the real highway network and discover verified meetup places within radius.
           </p>
         </div>
 
@@ -166,7 +172,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         {/* Spot Filter Pre-selection */}
         <div className="space-y-2">
           <label className="block text-xs font-medium text-zinc-300">
-            Find Near Midpoint (Within 1.5 km)
+            Real Places to Search (Within 2.5 - 5.0 km Radius)
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
@@ -223,6 +229,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
 
+        {/* Optional Google Places API Key */}
+        <div className="space-y-1.5 pt-1">
+          <button
+            type="button"
+            onClick={() => setShowKeyInput(!showKeyInput)}
+            className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <Key size={13} strokeWidth={1.75} className="text-zinc-500" />
+            <span>{showKeyInput ? 'Hide API key options' : 'Optional: Connect Google Places API key (uses OSM Overpass by default)'}</span>
+          </button>
+
+          {showKeyInput && (
+            <input
+              type="password"
+              value={googleApiKey}
+              onChange={(e) => setGoogleApiKey && setGoogleApiKey(e.target.value)}
+              placeholder="Enter Google Maps / Places API key..."
+              className="w-full h-10 px-3 text-xs bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-lime-400/80 transition"
+            />
+          )}
+        </div>
+
         {/* Primary CTA */}
         <div className="pt-2">
           <button
@@ -232,7 +260,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             className="w-full h-12 rounded-xl bg-lime-400 hover:bg-lime-300 text-zinc-950 font-semibold text-sm transition flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
           >
             <Route size={18} strokeWidth={2} />
-            <span>Trace Luzon Road Midpoint</span>
+            <span>Trace 2D Luzon Road Midpoint</span>
           </button>
         </div>
       </motion.div>

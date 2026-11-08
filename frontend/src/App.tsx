@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useWebSocket } from './hooks/useWebSocket';
-import { CalculationWeights, CategoryFilter, Participant, PoiItem, SpotCategory } from './types';
+import {
+  CalculationWeights,
+  CategoryFilter,
+  Participant,
+  PoiItem,
+  RoadCandidateVerdict,
+  RouteToPointResponse,
+  SpotCategory,
+  UserRoadMetric,
+  UserRoadRoute,
+} from './types';
 import { MapCanvas } from './components/MapCanvas';
 import { TelemetryBanner } from './components/TelemetryBanner';
 import { ControlDock } from './components/ControlDock';
@@ -35,6 +45,9 @@ export const App: React.FC = () => {
     beta: 0.55,
   });
 
+  // Optional Google Places API key
+  const [googleApiKey, setGoogleApiKey] = useState<string>('');
+
   // Pre-selected spot categories on Landing Page
   const [selectedCategories, setSelectedCategories] = useState<SpotCategory[]>([
     'cafe',
@@ -46,7 +59,15 @@ export const App: React.FC = () => {
   // Live filter on Map View ('all', 'cafe', 'mall', 'park', 'restaurant')
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
 
+  // Interactive Alternative & Venue Sync State (Rule 3)
   const [selectedPoi, setSelectedPoi] = useState<PoiItem | null>(null);
+  const [selectedTargetCoords, setSelectedTargetCoords] = useState<[number, number] | null>(null);
+  const [activeRoutes, setActiveRoutes] = useState<UserRoadRoute[] | null>(null);
+  const [activeMetrics, setActiveMetrics] = useState<UserRoadMetric[] | null>(null);
+  const [activeDeltaMins, setActiveDeltaMins] = useState<number | null>(null);
+  const [activeFairnessScore, setActiveFairnessScore] = useState<number | null>(null);
+  const [activeTargetName, setActiveTargetName] = useState<string | null>(null);
+  const [_isReRouting, setIsReRouting] = useState(false);
 
   const {
     isConnected,
@@ -67,17 +88,73 @@ export const App: React.FC = () => {
 
   const handleLaunchCalculation = () => {
     setSelectedPoi(null);
+    setSelectedTargetCoords(null);
+    setActiveRoutes(null);
+    setActiveMetrics(null);
+    setActiveDeltaMins(null);
+    setActiveFairnessScore(null);
+    setActiveTargetName(null);
     setActiveView('map');
-    startCalculation(participants, weights);
+    startCalculation(participants, weights, googleApiKey);
   };
 
   const handleReset = () => {
     setSelectedPoi(null);
+    setSelectedTargetCoords(null);
+    setActiveRoutes(null);
+    setActiveMetrics(null);
+    setActiveDeltaMins(null);
+    setActiveFairnessScore(null);
+    setActiveTargetName(null);
     resetCalculation();
   };
 
   const handleBackToLanding = () => {
     setActiveView('landing');
+  };
+
+  // Rule 3: Dynamic Re-routing when clicking an Alternative Midpoint Zone or Venue Card
+  const handleSelectTarget = async (
+    targetName: string,
+    targetCoords: [number, number],
+    venue?: PoiItem | null
+  ) => {
+    setSelectedTargetCoords(targetCoords);
+    setSelectedPoi(venue || null);
+    setActiveTargetName(targetName);
+
+    try {
+      setIsReRouting(true);
+      const res = await fetch('http://localhost:4000/api/route-to-point', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_name: targetName,
+          target_coords: targetCoords,
+          participants,
+        }),
+      });
+
+      if (res.ok) {
+        const data: RouteToPointResponse = await res.json();
+        setActiveRoutes(data.user_road_routes);
+        setActiveMetrics(data.user_metrics);
+        setActiveDeltaMins(data.delta_road_mins);
+        setActiveFairnessScore(data.fairness_score);
+      }
+    } catch (err) {
+      console.error('Failed to dynamically re-route to selected target', err);
+    } finally {
+      setIsReRouting(false);
+    }
+  };
+
+  const handleSelectAlternativeHub = (hub: RoadCandidateVerdict) => {
+    handleSelectTarget(hub.hub_name, hub.hub_coords, null);
+  };
+
+  const handleSelectVenue = (poi: PoiItem) => {
+    handleSelectTarget(poi.name, poi.coordinates, poi);
   };
 
   const allPois: PoiItem[] = verdict
@@ -91,7 +168,7 @@ export const App: React.FC = () => {
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-zinc-950 select-none">
-      {/* 1. Deck.gl + MapLibre Fullscreen Luzon Highway Canvas */}
+      {/* 1. Deck.gl + MapLibre Fullscreen 2D Luzon Highway Canvas (Rule 1: Strictly 2D) */}
       <div className={`absolute inset-0 transition-opacity duration-700 ${activeView === 'landing' ? 'opacity-40 pointer-events-none' : 'opacity-100 pointer-events-auto'}`}>
         <MapCanvas
           phase={phase}
@@ -103,8 +180,10 @@ export const App: React.FC = () => {
           winnerVerdict={verdict ? verdict.winner : null}
           pois={allPois}
           selectedPoi={selectedPoi}
-          onSelectPoi={(poi) => setSelectedPoi(poi)}
+          onSelectPoi={handleSelectVenue}
           categoryFilter={categoryFilter}
+          activeRoutes={activeRoutes}
+          selectedTargetCoords={selectedTargetCoords}
         />
       </div>
 
@@ -117,10 +196,12 @@ export const App: React.FC = () => {
           setSelectedCategories={setSelectedCategories}
           onSubmit={handleLaunchCalculation}
           isCalculating={isCalculating}
+          googleApiKey={googleApiKey}
+          setGoogleApiKey={setGoogleApiKey}
         />
       )}
 
-      {/* 3. View 2: Full-Viewport Luzon Road Tracer Map Elements */}
+      {/* 3. View 2: Full-Viewport 2D Luzon Road Tracer Map Elements */}
       {activeView === 'map' && (
         <>
           {/* Top-Center Live Telemetry Indicator */}
@@ -148,14 +229,19 @@ export const App: React.FC = () => {
             onCategoryFilterChange={setCategoryFilter}
           />
 
-          {/* Floating Verdict Drawer & Nearby Venue Explorer */}
+          {/* Floating Verdict Drawer & Real Radius Venue Explorer */}
           {verdict && (
             <VerdictDrawer
               verdict={verdict}
               selectedPoiId={selectedPoi ? selectedPoi.id : null}
-              onSelectPoi={(poi) => setSelectedPoi(poi)}
+              onSelectPoi={handleSelectVenue}
+              onSelectAlternative={handleSelectAlternativeHub}
               categoryFilter={categoryFilter}
               onCategoryFilterChange={setCategoryFilter}
+              activeMetrics={activeMetrics}
+              activeDeltaMins={activeDeltaMins}
+              activeFairnessScore={activeFairnessScore}
+              activeTargetName={activeTargetName}
             />
           )}
         </>

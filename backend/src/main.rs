@@ -4,7 +4,7 @@ use axum::{
         Query, State,
     },
     response::{IntoResponse, Json},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -19,17 +19,17 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod algorithm;
 mod models;
 mod osrm;
-mod poi;
+mod places;
 
-use algorithm::run_true_road_engine;
-use models::{CalculationRequest, CandidateHub, StreamEvent};
+use algorithm::{calculate_routes_to_point, run_true_road_engine};
+use models::{CalculationRequest, CandidateHub, RouteToPointRequest, StreamEvent};
 use osrm::OsrmClient;
-use poi::PoiService;
+use places::PlacesService;
 
 #[derive(Clone)]
 struct AppState {
     osrm_client: Arc<OsrmClient>,
-    poi_service: Arc<PoiService>,
+    places_service: Arc<PlacesService>,
 }
 
 #[derive(Deserialize)]
@@ -46,10 +46,10 @@ struct GeocodeResult {
 }
 
 #[derive(Deserialize)]
-struct PoisQuery {
+struct PlacesQuery {
     lng: f64,
     lat: f64,
-    name: Option<String>,
+    key: Option<String>,
 }
 
 #[tokio::main]
@@ -62,13 +62,13 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Initializing Gitna True Road-Pathing Engine (Luzon Edition)...");
+    info!("Initializing Gitna 2D True Road-Pathing Engine (V4 Real Radius Place Finder)...");
     let osrm_client = Arc::new(OsrmClient::new());
-    let poi_service = Arc::new(PoiService::new());
+    let places_service = Arc::new(PlacesService::new());
 
     let state = AppState {
         osrm_client,
-        poi_service,
+        places_service,
     };
 
     let cors = CorsLayer::new()
@@ -80,14 +80,16 @@ async fn main() {
         .route("/health", get(health_handler))
         .route("/api/health", get(health_handler))
         .route("/api/hubs", get(get_hubs_handler))
-        .route("/api/pois", get(get_pois_handler))
+        .route("/api/places", get(get_places_handler))
+        .route("/api/pois", get(get_places_handler)) // backward compat
+        .route("/api/route-to-point", post(route_to_point_handler))
         .route("/api/geocode", get(geocode_handler))
         .route("/ws/calculate", get(ws_calculate_handler))
         .layer(cors)
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
-    info!("Gitna True Road Engine listening on http://{}", addr);
+    info!("Gitna V4 2D True Road Engine listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -101,9 +103,11 @@ async fn main() {
 async fn health_handler() -> impl IntoResponse {
     Json(json!({
         "status": "online",
-        "service": "Gitna True Road-Path Midpoint Engine (Luzon V3)",
-        "version": "3.0.0",
-        "routing_engine": "OSRM Routing Engine + Overpass API",
+        "service": "Gitna 2D True Road-Path Midpoint Engine (V4)",
+        "version": "4.0.0",
+        "map_mode": "Strict 2D Overhead Plane Only (Zero 3D Tilt)",
+        "place_engine": "Dual-Engine (Google Places API + Live OSM Radius)",
+        "synthetic_places": false,
         "unified_mode": "Real Road Highway Network (100% GeoJSON Polylines)",
     }))
 }
@@ -201,23 +205,38 @@ async fn get_hubs_handler() -> Json<Vec<CandidateHub>> {
     ])
 }
 
-async fn get_pois_handler(
-    Query(query): Query<PoisQuery>,
+async fn get_places_handler(
+    Query(query): Query<PlacesQuery>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let pois = state
-        .poi_service
-        .fetch_pois_for_midpoint(
+        .places_service
+        .search_places_around_anchor(
             [query.lng, query.lat],
-            query.name.as_deref().unwrap_or("Calculated Midpoint"),
+            query.key.as_deref(),
         )
         .await;
     Json(pois)
 }
 
+/// Dynamic Re-Routing: route all participants directly to any clicked venue or alternative hub (Rule 3)
+async fn route_to_point_handler(
+    State(state): State<AppState>,
+    Json(req): Json<RouteToPointRequest>,
+) -> impl IntoResponse {
+    let resp = calculate_routes_to_point(
+        &state.osrm_client,
+        &req.target_name,
+        req.target_coords,
+        &req.participants,
+    )
+    .await;
+    Json(resp)
+}
+
 async fn geocode_handler(Query(query): Query<GeocodeQuery>) -> impl IntoResponse {
     let client = reqwest::Client::builder()
-        .user_agent("GitnaRoadEngine/3.0 (contact@gitna.ph)")
+        .user_agent("GitnaRoadEngine/4.0 (contact@gitna.ph)")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -291,16 +310,18 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         if req.action == "START_CALCULATION" {
                             let (tx, mut rx) = mpsc::channel::<StreamEvent>(32);
                             let osrm_clone = state.osrm_client.clone();
-                            let poi_service_clone = state.poi_service.clone();
+                            let places_clone = state.places_service.clone();
                             let participants = req.participants;
                             let weights = req.weights.unwrap_or_default();
+                            let google_key = req.google_api_key;
 
                             tokio::spawn(async move {
                                 run_true_road_engine(
                                     &osrm_clone,
-                                    &poi_service_clone,
+                                    &places_clone,
                                     participants,
                                     weights,
+                                    google_key,
                                     tx,
                                 )
                                 .await;

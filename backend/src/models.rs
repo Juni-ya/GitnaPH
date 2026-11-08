@@ -7,7 +7,12 @@ pub struct Participant {
     #[serde(default)]
     pub town_name: Option<String>,
     pub coordinates: [f64; 2], // [lng, lat]
+    #[serde(default = "default_color")]
     pub color: String,
+}
+
+fn default_color() -> String {
+    "#CCFF00".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,12 +57,15 @@ pub struct CalculationRequest {
     pub weights: Option<CalculationWeights>,
     #[serde(default)]
     pub selected_categories: Option<Vec<String>>,
+    #[serde(default)]
+    pub google_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartialPolyline {
     pub participant_id: String,
     pub coordinates: Vec<[f64; 2]>,
+    #[serde(default = "default_color")]
     pub color: String,
 }
 
@@ -67,6 +75,7 @@ pub struct UserRoadMetric {
     pub participant_name: String,
     pub road_time_mins: f64,
     pub road_distance_km: f64,
+    #[serde(default = "default_color")]
     pub color: String,
 }
 
@@ -77,6 +86,7 @@ pub struct UserRoadRoute {
     pub coordinates: Vec<[f64; 2]>,
     pub road_time_mins: f64,
     pub road_distance_km: f64,
+    #[serde(default = "default_color")]
     pub color: String,
 }
 
@@ -96,6 +106,8 @@ pub struct RoadCandidateVerdict {
     pub rank: usize,
     #[serde(default)]
     pub area_name: Option<String>,
+    #[serde(default)]
+    pub snapped_venue: Option<PoiItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,8 +118,18 @@ pub struct PoiItem {
     pub coordinates: [f64; 2], // [lng, lat]
     pub distance_meters: f64,
     pub walking_minutes: u32,
+    #[serde(default)]
     pub address: Option<String>,
+    #[serde(default)]
     pub highlight: Option<String>,
+    #[serde(default)]
+    pub rating: Option<f64>,
+    #[serde(default)]
+    pub user_rating_count: Option<u32>,
+    #[serde(default)]
+    pub google_maps_uri: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>, // "google_places" | "osm"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -116,6 +138,30 @@ pub struct CategorizedPois {
     pub malls: Vec<PoiItem>,
     pub parks: Vec<PoiItem>,
     pub restaurants: Vec<PoiItem>,
+    #[serde(default)]
+    pub search_anchor: Option<[f64; 2]>,
+    #[serde(default)]
+    pub search_radius_meters: Option<f64>,
+    #[serde(default)]
+    pub recommended_place: Option<PoiItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteToPointRequest {
+    pub target_name: String,
+    pub target_coords: [f64; 2], // [lng, lat]
+    pub participants: Vec<Participant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteToPointResponse {
+    pub target_name: String,
+    pub target_coords: [f64; 2],
+    pub user_road_routes: Vec<UserRoadRoute>,
+    pub user_metrics: Vec<UserRoadMetric>,
+    pub total_road_time_mins: f64,
+    pub delta_road_mins: f64,
+    pub fairness_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

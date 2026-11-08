@@ -11,7 +11,7 @@ import {
   Compass,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { CategoryFilter, FinalRoadVerdictPayload, PoiItem } from '../types';
+import { CategoryFilter, FinalRoadVerdictPayload, PoiItem, RoadCandidateVerdict, UserRoadMetric } from '../types';
 import { VenueExplorer } from './VenueExplorer';
 
 interface VerdictDrawerProps {
@@ -20,6 +20,11 @@ interface VerdictDrawerProps {
   selectedPoiId?: string | null;
   categoryFilter?: CategoryFilter;
   onCategoryFilterChange?: (filter: CategoryFilter) => void;
+  onSelectAlternative?: (hub: RoadCandidateVerdict, index: number) => void;
+  activeMetrics?: UserRoadMetric[] | null;
+  activeDeltaMins?: number | null;
+  activeFairnessScore?: number | null;
+  activeTargetName?: string | null;
 }
 
 export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
@@ -28,6 +33,11 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
   selectedPoiId,
   categoryFilter = 'all',
   onCategoryFilterChange,
+  onSelectAlternative,
+  activeMetrics,
+  activeDeltaMins,
+  activeFairnessScore,
+  activeTargetName,
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [selectedHubIndex, setSelectedHubIndex] = useState<number>(0);
@@ -37,7 +47,7 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
     if (verdict) {
       try {
         confetti({
-          particleCount: 50,
+          particleCount: 45,
           spread: 60,
           origin: { y: 0.8 },
           colors: ['#ccff00', '#38bdf8', '#f43f5e', '#ffffff'],
@@ -55,8 +65,17 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
       ? verdict.winner
       : verdict.alternatives[selectedHubIndex - 1] || verdict.winner;
 
+  const displayMetrics = activeMetrics || currentHubVerdict.user_metrics;
+  const displayDelta = activeDeltaMins !== null && activeDeltaMins !== undefined
+    ? activeDeltaMins
+    : currentHubVerdict.delta_road_mins;
+  const displayFairness = activeFairnessScore !== null && activeFairnessScore !== undefined
+    ? activeFairnessScore
+    : currentHubVerdict.fairness_score;
+  const displayTargetName = activeTargetName || currentHubVerdict.hub_name;
+
   const maxRoadTime = Math.max(
-    ...currentHubVerdict.user_metrics.map((ut) => ut.road_time_mins),
+    ...displayMetrics.map((ut) => ut.road_time_mins),
     1
   );
 
@@ -67,11 +86,19 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
     (verdict.pois.restaurants?.length || 0);
 
   const handleShare = () => {
-    const text = `Gitna Road Midpoint: ${verdict.winner.hub_name} (Fairness: ${verdict.winner.fairness_score}%, Travel Disparity: ${verdict.winner.delta_road_mins} min, ${totalSpotCount} spots within 1.5 km). Calculated using real Luzon road network.`;
+    const text = `Gitna Road Midpoint: ${displayTargetName} (Fairness: ${displayFairness}%, Travel Disparity: ${displayDelta} min, ${totalSpotCount} real places within radius). Calculated using real Luzon road network.`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
+  const handleHubSelect = (index: number) => {
+    setSelectedHubIndex(index);
+    const hub = index === 0 ? verdict.winner : verdict.alternatives[index - 1] || verdict.winner;
+    if (onSelectAlternative) {
+      onSelectAlternative(hub, index);
     }
   };
 
@@ -93,17 +120,21 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
               </div>
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-zinc-100 flex items-baseline gap-2 truncate">
-                  <span className="truncate">{currentHubVerdict.hub_name}</span>
+                  <span className="truncate">{displayTargetName}</span>
                   <span className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-lime-400/10 border border-lime-400/30 text-lime-400 font-medium">
-                    <span className="tabular-nums font-mono">{currentHubVerdict.fairness_score}%</span> fair
+                    <span className="tabular-nums font-mono">{displayFairness}%</span> fair
                   </span>
                 </h3>
                 <p className="text-xs text-zinc-400 truncate">
-                  {currentHubVerdict.area_name
-                    ? currentHubVerdict.area_name
-                    : selectedHubIndex === 0
-                    ? `Optimal road midpoint • ${totalSpotCount} spots within 1.5 km`
-                    : 'Alternative meetup option'}
+                  {currentHubVerdict.snapped_venue ? (
+                    <span>
+                      Snapped to: <strong className="text-zinc-200">{currentHubVerdict.snapped_venue.name}</strong>
+                    </span>
+                  ) : currentHubVerdict.area_name ? (
+                    currentHubVerdict.area_name
+                  ) : (
+                    `Road Midpoint • ${totalSpotCount} real places within radius`
+                  )}
                 </p>
               </div>
             </div>
@@ -130,20 +161,20 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
 
           {!isMinimized && (
             <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(85vh-60px)]">
-              {/* Podium Selectors: Winner & Alternatives */}
+              {/* Podium Selectors: Winner & Alternatives (Rule 3) */}
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelectedHubIndex(0)}
+                  onClick={() => handleHubSelect(0)}
                   className={`p-2.5 rounded-xl border text-left transition active:scale-[0.98] ${
-                    selectedHubIndex === 0
+                    selectedHubIndex === 0 && !selectedPoiId
                       ? 'bg-zinc-800 border-lime-400/70 text-zinc-100 ring-1 ring-lime-400/40'
                       : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900'
                   }`}
                 >
                   <div className="flex items-center gap-1 text-[11px] font-medium text-lime-400">
                     <Trophy size={14} strokeWidth={1.75} />
-                    <span>Optimal</span>
+                    <span>Option 1</span>
                   </div>
                   <div className="text-xs font-semibold text-zinc-200 truncate mt-1">
                     {verdict.winner.hub_name.split('(')[0]}
@@ -157,9 +188,9 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
                   <button
                     key={alt.hub_id}
                     type="button"
-                    onClick={() => setSelectedHubIndex(idx + 1)}
+                    onClick={() => handleHubSelect(idx + 1)}
                     className={`p-2.5 rounded-xl border text-left transition active:scale-[0.98] ${
-                      selectedHubIndex === idx + 1
+                      selectedHubIndex === idx + 1 && !selectedPoiId
                         ? 'bg-zinc-800 border-cyan-400/70 text-zinc-100 ring-1 ring-cyan-400/40'
                         : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900'
                     }`}
@@ -178,17 +209,19 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
                 ))}
               </div>
 
-              {/* Side-by-Side Commute Breakdown (The "Road Receipt") */}
+              {/* Side-by-Side Commute Breakdown (The "Road Receipt" - dynamically synced) */}
               <div className="p-3.5 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-3 font-sans">
                 <div className="flex items-center justify-between text-xs pb-1">
-                  <span className="font-semibold text-zinc-200">Drive time comparison</span>
-                  <span className="text-zinc-400">
-                    Disparity: <span className="tabular-nums font-mono text-zinc-200 font-medium">{currentHubVerdict.delta_road_mins}</span> min
+                  <span className="font-semibold text-zinc-200">
+                    Drive times to: <span className="text-lime-400 font-medium truncate max-w-[200px] inline-block align-bottom">{displayTargetName}</span>
+                  </span>
+                  <span className="text-zinc-400 shrink-0">
+                    Disparity: <span className="tabular-nums font-mono text-zinc-200 font-medium">{displayDelta}</span> min
                   </span>
                 </div>
 
                 <div className="space-y-3">
-                  {currentHubVerdict.user_metrics.map((ut) => {
+                  {displayMetrics.map((ut) => {
                     const pct = Math.round((ut.road_time_mins / maxRoadTime) * 100);
                     return (
                       <div key={ut.participant_id} className="space-y-1.5">
@@ -233,15 +266,15 @@ export const VerdictDrawer: React.FC<VerdictDrawerProps> = ({
                 </p>
               </div>
 
-              {/* Meetup Venues physically surrounding winning road coordinate */}
+              {/* Real Places (Google Places API + Live OSM Radius - ZERO FAKE PLACES) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs font-medium text-zinc-300">
                   <span className="flex items-center gap-1.5">
                     <MapPin size={16} strokeWidth={1.75} className="text-zinc-400" />
-                    <span>Nearby meetup spots (within 1.5 km)</span>
+                    <span>Real meetup places ({verdict.pois.search_radius_meters ? `${(verdict.pois.search_radius_meters / 1000).toFixed(1)} km radius` : 'around midpoint'})</span>
                   </span>
                   <span className="text-zinc-500 text-[11px] tabular-nums font-mono">
-                    {totalSpotCount} spots found
+                    {totalSpotCount} verified places
                   </span>
                 </div>
                 <VenueExplorer
