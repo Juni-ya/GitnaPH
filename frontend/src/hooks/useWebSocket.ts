@@ -13,7 +13,9 @@ import {
 const DEFAULT_WS_URL =
   import.meta.env.VITE_WS_URL ||
   (typeof window !== 'undefined'
-    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:4000/ws/calculate`
+    ? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:4000/ws/calculate`
+        : 'wss://gitnaph.onrender.com/ws/calculate')
     : 'ws://localhost:4000/ws/calculate');
 
 export function useWebSocket(url: string = DEFAULT_WS_URL) {

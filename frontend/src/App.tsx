@@ -21,7 +21,9 @@ import { LandingPage } from './components/LandingPage';
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:4000`
+    ? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `${window.location.protocol}//${window.location.hostname}:4000`
+        : 'https://gitnaph.onrender.com')
     : 'http://localhost:4000');
 
 export const App: React.FC = () => {
