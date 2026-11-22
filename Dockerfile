@@ -1,10 +1,10 @@
 # Multi-stage Docker build for Gitna Rust Backend
-FROM rust:1.82-slim-bookworm AS builder
+FROM rust:1-slim-bookworm AS builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY backend/Cargo.toml ./
+COPY backend/Cargo.toml backend/Cargo.lock* ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
 
 COPY backend/src ./src
