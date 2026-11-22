@@ -18,6 +18,12 @@ import { ControlDock } from './components/ControlDock';
 import { VerdictDrawer } from './components/VerdictDrawer';
 import { LandingPage } from './components/LandingPage';
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:4000`
+    : 'http://localhost:4000');
+
 export const App: React.FC = () => {
   // View mode: 'landing' (initial search setup) or 'map' (live road trace canvas)
   const [activeView, setActiveView] = useState<'landing' | 'map'>('landing');
@@ -125,7 +131,7 @@ export const App: React.FC = () => {
 
     try {
       setIsReRouting(true);
-      const res = await fetch('http://localhost:4000/api/route-to-point', {
+      const res = await fetch(`${API_BASE_URL}/api/route-to-point`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

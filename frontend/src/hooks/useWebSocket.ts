@@ -10,7 +10,13 @@ import {
   TestedCandidateFrame,
 } from '../types';
 
-export function useWebSocket(url: string = 'ws://localhost:4000/ws/calculate') {
+const DEFAULT_WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:4000/ws/calculate`
+    : 'ws://localhost:4000/ws/calculate');
+
+export function useWebSocket(url: string = DEFAULT_WS_URL) {
   const [isConnected, setIsConnected] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
   const [phase, setPhase] = useState<EnginePhase>('IDLE');

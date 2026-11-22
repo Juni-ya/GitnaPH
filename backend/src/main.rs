@@ -88,12 +88,16 @@ async fn main() {
         .layer(cors)
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(4000);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Gitna V4 2D True Road Engine listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .expect("Failed to bind TCP listener on port 4000");
+        .unwrap_or_else(|e| panic!("Failed to bind TCP listener on port {}: {}", port, e));
 
     axum::serve(listener, app)
         .await
